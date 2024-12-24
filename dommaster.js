@@ -630,7 +630,7 @@ function createElement(template, stateManager) {
 }
 // CDN
 (function (g) {
-  g.window = {
+  g.master = {
     createElement,
     ReactiveState,
   };
