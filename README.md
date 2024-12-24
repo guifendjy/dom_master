@@ -21,7 +21,7 @@ Add following script tag to yout HTML file:
 ```
 ## Usage Example
 ```javascript
-// master is available globally via the "window".
+// master is available globally via the window Object.
 
 // defining reactive state
 const state = new master.ReactiveState({
