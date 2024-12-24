@@ -629,10 +629,11 @@ function createElement(template, stateManager) {
   return fragment;
 }
 // CDN
-(function(global){
-  global.dommaster = {
+(function (g) {
+  g.window = {
     createElement,
-    ReactiveState
-})(window)
+    ReactiveState,
+  };
+})(window);
 
 export { createElement, ReactiveState };
