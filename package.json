@@ -1,0 +1,12 @@
+{
+  "name": "dom_master",
+  "version": "1.0.0",
+  "type":"module",
+  "description": "A lightweight JavaScript library for reactive DOM updates and dynamic rendering without the need for frameworks or build tools.",
+  "main": "dommaster.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Dads Guifendjy, Paul",
+  "license": "MIT"
+}
