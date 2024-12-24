@@ -1,3 +1,4 @@
+# DOM MASTER
 dom_master: A Lightweight DOM Manipulation and Reactive Framework
 
 dom_master is a minimal, vanilla JavaScript library designed to simplify 
@@ -6,12 +7,67 @@ overhead of large frameworks. A little unconventional, it uses string literals t
 describe the UI, it uses TEXT_NODEs to enable users to conditionally render elements.
 tho it gets the job done, it is limited, it does not work with elements with strict structures.
 
-Key Features
+## Key Features
 	•	Reactive State Management: Bind data to the DOM and automatically update elements when state changes.
 	•	Dynamic Rendering: Effortlessly handle loops (for:each, start:if) and conditional rendering with intuitive syntax.
 	•	Fine-Grained Updates: Efficiently update only the necessary DOM elements to ensure high performance.
 	•	No Build Tools: Works directly in the browser—no need for bundlers or transpilers.
 	•	Custom Interactivity: Provides local state for dynamically created nodes, ensuring scoped reactivity.
+ 
+## CDN
+Add following script tag to yout HTML file:
+```html
+<script src="https://cdn.jsdelivr.net/gh/guifendjy/dom_master/dommaster.js"></script>
+```
+## Usage Example
+```javascript
+// import 
+import { createElement, ReactiveState } from "./dom_master/dommaster.js";
 
+// defining reactive state
+const state = new ReactiveState({
+  count: 0,
+  styles: `
+    font-weight: bold;
+    color: orangered;
+    `,
+  increment: () => {
+    state.count++;
+  },
+  decrement: () => !state.count <= 0 && state.count--,
+  logout: () => {
+    state.auth = { ...state.auth, isLoggedin: !state.auth.isLoggedin };
+  },
+});
+```
+## Template - UI
+```javascript
+// Step 2: Define a template
+const template = `
+  <div class="box">
+      <div>
+          <p style={styles}>
+              count: {count} - one up: {count + 1}
+          </p>
+          <button class="btn" id="add" onclick="increment">increment</button>
+          <button disabled="{count <= 0}"  class="btn" onclick="decrement">decrement</button>
+          {start:if count > 0}
+              <p>if condition is true: <span style="font-weight: bold;">{count}</span> times</p>
+          {:else}
+              <p>else if condition not true: {count}  </p>
+          {end:if}
+      </div>
+  </div>
+    `;
+```
+
+## CreateElement
+
+```javascript
+let counter = createElement(template, state);
+
+// append to the dom
+document.body.appendChild(counter);
+```
 Perfect for small-to-medium projects or as a building block for larger custom frameworks.
 Start building smarter and faster with dom_master today!
