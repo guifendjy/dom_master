@@ -17,15 +17,14 @@ tho it gets the job done, it is limited, it does not work with elements with str
 ## CDN
 Add following script tag to yout HTML file:
 ```html
-<script src="https://cdn.jsdelivr.net/gh/guifendjy/dom_master/dommaster.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/guifendjy/dom_master@v1.0.0/dommaster.js"></script>
 ```
 ## Usage Example
 ```javascript
-// import 
-import { createElement, ReactiveState } from "./dom_master/dommaster.js";
+// master is available globally via the "window".
 
 // defining reactive state
-const state = new ReactiveState({
+const state = new master.ReactiveState({
   count: 0,
   styles: `
     font-weight: bold;
@@ -64,7 +63,7 @@ const template = `
 ## CreateElement
 
 ```javascript
-let counter = createElement(template, state);
+let counter = master.createElement(template, state);
 
 // append to the dom
 document.body.appendChild(counter);
