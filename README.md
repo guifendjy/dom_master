@@ -52,8 +52,6 @@ const template = `
           <button disabled="{count <= 0}"  class="btn" onclick="decrement">decrement</button>
           {start:if count > 0}
               <p>if condition is true: <span style="font-weight: bold;">{count}</span> times</p>
-          {:else}
-              <p>else if condition not true: {count}  </p>
           {end:if}
       </div>
   </div>
