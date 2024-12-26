@@ -42,7 +42,7 @@ const state = new master.ReactiveState({
 const template = `
   <div class="box">
       <div>
-          <p style={styles}>
+          <p style="{styles}">
               count: {count} - one up: {count + 1}
           </p>
           <button class="btn" id="add" onclick="increment">increment</button>
