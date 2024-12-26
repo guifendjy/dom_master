@@ -34,9 +34,6 @@ const state = new master.ReactiveState({
     state.count++;
   },
   decrement: () => !state.count <= 0 && state.count--,
-  logout: () => {
-    state.auth = { ...state.auth, isLoggedin: !state.auth.isLoggedin };
-  },
 });
 ```
 ## Template - UI
