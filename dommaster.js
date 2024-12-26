@@ -97,9 +97,6 @@ class ReactiveState {
 }
 
 // utils
-//FIXME: text nodes and attributes evaluates expression rather than trigger a getter, so any vars outside the local state
-// which is used in an attribute or text node when evaluated it doesn't work, cause eval won't match against local state.
-// local proxy(syncronizes gobal state with localState)
 export function createLocalProxy(localState, globalState, globalManager) {
   return new Proxy(
     {
@@ -131,7 +128,6 @@ export function createLocalProxy(localState, globalState, globalManager) {
   );
 }
 
-// Utility functions
 function replaceVariables(template, variables) {
   return template.replace(braceRegex, (_, expression) => {
     const trimmedExpression = expression.trim();
@@ -170,7 +166,6 @@ function evaluateExpression(expression, stateProxy) {
 }
 
 //FIXME: style and class attributes needs more surgical change
-
 function setAttributes(element, attrName, value) {
   if (value === "true") {
     element[attrName] = value;
