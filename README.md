@@ -63,5 +63,7 @@ let counter = master.createElement(template, state);
 // append to the dom
 document.body.appendChild(counter);
 ```
-Perfect for small-to-medium projects or as a building block for larger custom frameworks.
-Start building smarter and faster with dom_master today!
+Perfect for small-to-medium personal projects. 
+
+feel free to try dom_master today!
+
