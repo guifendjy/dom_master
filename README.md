@@ -1,5 +1,5 @@
 # DOM MASTER
-dom_master: A Lightweight DOM Manipulation and Reactive Framework
+dom_master: A Lightweight DOM Manipulation and reactive library.
 
 dom_master is a minimal, vanilla JavaScript library designed to simplify 
 dynamic DOM manipulation and create reactive user interfaces without the 
