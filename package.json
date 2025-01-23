@@ -1,7 +1,7 @@
 {
   "name": "dom_master",
-  "version": "1.0.0",
-  "type":"module",
+  "version": "1.0.1",
+  "type": "module",
   "description": "A lightweight JavaScript library for reactive DOM updates and dynamic rendering without the need for frameworks or build tools.",
   "main": "dommaster.js",
   "scripts": {
