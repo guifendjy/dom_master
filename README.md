@@ -17,7 +17,7 @@ tho it gets the job done, it is limited, it does not work with elements with str
 ## CDN
 Add following script tag to yout HTML file:
 ```html
-<script type="module" src="https://cdn.jsdelivr.net/gh/guifendjy/dom_master@v1.0.0/dommaster.js"></script>
+<script type="module" src="https://cdn.jsdelivr.net/gh/guifendjy/dom_master@latest/dommaster.js"></script>
 ```
 ## Usage Example
 ```javascript
