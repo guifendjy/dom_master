@@ -351,21 +351,25 @@ function parseIfStatements(node, variables, stateManager) {
         let lastEval = undefined;
         const update = () => {
           let evaluation = evaluateExpression(expression, variables);
+
           // guards against unnecessary rerenders if condition hasn't changed
           if (lastEval === evaluation) return;
 
-          let current = start.nextSibling;
-          while (current && current !== end) {
-            const next = current.nextSibling;
-            parentNode.removeChild(current);
-            current = next;
+          if (evaluation) {
+            ifBlockNodes.forEach((node) => {
+              parentNode.insertBefore(node, end);
+            });
+            elseBlockNodes.forEach((node) => {
+              parentNode.removeChild(node);
+            });
+          } else {
+            elseBlockNodes.forEach((node) => {
+              parentNode.insertBefore(node, end);
+            });
+            ifBlockNodes.forEach((node) => {
+              parentNode.removeChild(node);
+            });
           }
-
-          const contentToRender = evaluation ? ifBlockNodes : elseBlockNodes;
-
-          contentToRender.forEach((node) => {
-            parentNode.insertBefore(node, end);
-          });
 
           lastEval = evaluation;
         };
