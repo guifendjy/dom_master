@@ -1,5 +1,13 @@
-import "./each_prototype.js";
 const braceRegex = new RegExp(/\{\s*([^\{\}]+?)\s*\}/, "g");
+
+const start_each = new RegExp(
+  /\{for:each (\{[^}]*\}|[^\{,]+)(?:, ([^,]+))? of ([^\}]+)\}/
+);
+const endEach = new RegExp(/\{end:each\}/);
+
+const start_if = new RegExp(/\{start\:if (.*?)\}/);
+const elseRegx = new RegExp(/\{\:else\}/);
+const endIfRegx = new RegExp(/\{end\:if\}/);
 
 class ReactiveState {
   constructor(initialState = {}) {
@@ -13,12 +21,6 @@ class ReactiveState {
         return key in target ? target[key] : undefined;
       },
       set: (target, key, value) => {
-        // console.log(
-        //   "reactive prox",
-        //   key,
-        //   { new: value, old: target[key] },
-        //   target[key] === value
-        // );
         if (target[key] !== value) {
           // if it's an array changes will have to be significant to trigger a update
           target[key] = value;
@@ -97,7 +99,7 @@ class ReactiveState {
 }
 
 // utils
-export function createLocalProxy(localState, globalState, globalManager) {
+function createLocalProxy(localState, globalState, globalManager) {
   return new Proxy(
     {
       ...localState,
@@ -106,17 +108,18 @@ export function createLocalProxy(localState, globalState, globalManager) {
     },
     {
       get(target, key) {
+        // console.log("local", key);
+
         if (key in target) return target[key];
         if (key in globalState) return globalState[key];
       },
       set(target, key, value) {
-        // console.log("local", key, value);
-        if (target[key] === value) return;
+        if (typeof target[key] == "object" && target[key] == value) return true;
+
         if (key in target) {
           target[key] = value;
 
           return true;
-          // will initial update here
         }
         if (key in globalState) {
           globalState[key] = value;
@@ -165,22 +168,42 @@ function evaluateExpression(expression, stateProxy) {
   }
 }
 
-//FIXME: style and class attributes needs more surgical change
 function setAttributes(element, attrName, value) {
   if (value === "true") {
-    element[attrName] = value;
-  } else if (value === "false" || value == "null") {
+    // Boolean attributes: set the attribute with an empty value
+    element.setAttribute(attrName, "");
+  } else if (value === "false" || value === "null" || value === "undefined") {
+    // Boolean attributes: remove the attribute
     element.removeAttribute(attrName);
+  } else if (attrName === "value" && element instanceof HTMLInputElement) {
+    // Special case for input value: set the property directly
+    // element.setAttribute("value", value); // this reflects the state in the dom -> it less performant
+    element.value = value;
+  } else if (attrName === "style" && typeof value === "string") {
+    // Style attribute: set as a string
+    element.setAttribute("style", value);
+  } else if (attrName === "class") {
+    // Class attribute: set as a string
+    element.setAttribute("class", value);
   } else {
-    if (attrName == "style") {
-      element.setAttribute(attrName, value);
-    }
-    if (attrName == "class") attrName = "className";
-    element[attrName] = value;
+    // General case: set the attribute directly
+    element.setAttribute(attrName, value);
   }
 }
 
-// Main DOM parsing functions
+let Booleans = [
+  "true",
+  "false",
+  "null",
+  "undefined",
+  "NaN",
+  "NaN",
+  "Infinity",
+  "-Infinity",
+];
+const isStringRegx = new RegExp(/(['"])(?:(?!\1|\\).|\\.)*\1/); // check for string args -> "hello" : it's not a prop in variables
+
+// textNodes and attributes parse
 function parseNode(node, variables, stateManager) {
   if (node.nodeType === Node.TEXT_NODE) {
     const template = node.nodeValue;
@@ -191,13 +214,7 @@ function parseNode(node, variables, stateManager) {
     };
     update();
 
-    const { unsubscribe } = registerDependencies(
-      template,
-      variables,
-      update,
-      stateManager
-    );
-    observeNode(node.parentNode, unsubscribe);
+    registerDependencies(template, variables, update, stateManager);
   }
 
   if (node.nodeType === Node.ELEMENT_NODE) {
@@ -229,7 +246,7 @@ function parseNode(node, variables, stateManager) {
             const argv = argString
               ? argString
                   .split(/\s*,\s*/)
-                  .map((arg) => evaluateExpression(arg.trim(), variables))
+                  .map((arg) => getArgumentValue(arg.trim(), variables))
               : [];
 
             handler.call(variables, ...argv, e);
@@ -247,13 +264,7 @@ function parseNode(node, variables, stateManager) {
           setAttributes(node, attr.name, value);
         };
         update();
-        const { unsubscribe } = registerDependencies(
-          template,
-          variables,
-          update,
-          stateManager
-        );
-        observeNode(node, unsubscribe);
+        registerDependencies(template, variables, update, stateManager);
       }
     });
 
@@ -264,204 +275,249 @@ function parseNode(node, variables, stateManager) {
   }
 }
 
-// function to observe node and to unsub them when they are no longer on the dom
-// temporary it doesn't do a thorough cleanup.
-function observeNode(targetElement, unsubCallback) {
-  const observer = new MutationObserver(function (mutationList) {
-    mutationList.forEach((mutation) => {
-      if (mutation.type === "childList") {
-        mutation.removedNodes.forEach((removedNode) => {
-          if (removedNode.isEqualNode(targetElement)) {
-            unsubCallback();
-            // console.log(removedNode, unsubCallback);
-          }
-        });
-      }
-    });
-  });
+function getArgumentValue(currentArg, variables) {
+  // handles boolean
+  if (Booleans.some((b) => b == currentArg)) {
+    return parsePrimitive(currentArg);
+  }
 
-  let root = document.body;
-  if (root) observer.observe(root, { childList: true, subtree: true });
+  // handles strings
+  if (isStringRegx.test(currentArg)) {
+    let match = currentArg.match(isStringRegx);
+    return match[0].trim().replace(/['"]/g, ""); // removes quotes
+  } else {
+    // handles state derived data
+
+    if (currentArg.includes(".")) {
+      let objKey = currentArg.split(".")[0];
+      let targetKey = currentArg.split(".").at(-1);
+
+      if (!(targetKey in variables[objKey])) {
+        console.error(
+          `Error: undefined reading arguments ${currentArg}.`,
+          variables[objKey]
+        );
+        return;
+      }
+    }
+
+    return evaluateExpression(currentArg, variables); // else evaluate it from state
+  }
 }
 
 // parses if Statements
-function parseIfStatements(node, variables, stateManager) {
-  const nodes = Array.from(node.childNodes);
-  nodes.forEach((node, index) => {
-    const start_if = new RegExp(/\{start\:if (.*?)\}/);
-    let elseRegx = new RegExp(/\{\:else\}/);
-    let endIfRegx = new RegExp(/\{end\:if\}/);
+function getBlock(nodes) {
+  let i = 0;
 
-    if (node.nodeType === Node.TEXT_NODE && start_if.test(node.nodeValue)) {
-      let condition = node.nodeValue.match(start_if);
+  while (i < nodes.length) {
+    if (
+      nodes[i].nodeType === Node.TEXT_NODE &&
+      start_if.test(nodes[i].nodeValue)
+    ) {
+      let j = i + 1;
+      let elseIndex = -1;
+      let blockStart = nodes[i];
+      let condition = nodes[i].nodeValue.match(start_if)[1];
 
-      if (condition) {
-        const expression = condition[1];
-
-        const shallowCopyOfNodes = [...nodes]; // temp copy of nodes
-        const nodeChildren = shallowCopyOfNodes.slice(index);
-
-        // getting block nodes
-        const ifBlockNodes = getNodeRange(
-          shallowCopyOfNodes.slice(index + 1),
-          (node) =>
-            elseRegx.test(node.nodeValue) || endIfRegx.test(node.nodeValue)
-        );
-        const elseIndexStart = nodes.findIndex((node) =>
-          elseRegx.test(node.nodeValue)
-        );
-
-        const elseBlockNodes =
-          elseIndexStart != -1
-            ? getNodeRange(nodes.slice(elseIndexStart + 1), (node) =>
-                endIfRegx.test(node.nodeValue)
-              )
-            : [];
-
-        const parentNode = node.parentNode;
-        // will use to remove and replace
-        const [start, end] = nodeChildren
-          .filter(
-            (node) =>
-              start_if.test(node.nodeValue) ||
-              endIfRegx.test(node.nodeValue) ||
-              elseRegx.test(node.nodeValue)
-          )
-          .map((node) => {
-            node.nodeValue = "";
-            return node;
-          });
-
-        // warning
-        if (!expression) {
-          return console.error(
-            `Error evaluating statement. expected {start:if condition} but got: ${node.nodeValue.trim()}`
-          );
+      // Scan for "end" or "else"
+      while (j < nodes.length) {
+        if (
+          nodes[j].nodeType === Node.TEXT_NODE &&
+          endIfRegx.test(nodes[j].nodeValue)
+        ) {
+          break; // End of block
+        }
+        if (
+          nodes[j].nodeType === Node.TEXT_NODE &&
+          elseRegx.test(nodes[j].nodeValue) &&
+          elseIndex === -1
+        ) {
+          elseIndex = j; // Mark first occurrence of "else"
         }
 
+        j++;
+      }
+
+      // Extract the if block
+      let ifBlock = nodes.slice(i + 1, elseIndex !== -1 ? elseIndex : j);
+      let elseBlock = elseIndex !== -1 ? nodes.slice(elseIndex + 1, j) : [];
+
+      nodes.splice(i, j - i);
+      // Remove processed nodes
+      return { ifBlock, elseBlock, blockStart, condition };
+    }
+    i++;
+  }
+
+  return null;
+}
+
+// new implementation -> may have fixed the consecutive blocks issues
+function parseIfStatements(node, variables, stateManager) {
+  const nodes = Array.from(node.childNodes);
+  if (!nodes.length) return;
+  let shallowCopyOfNodes = [...nodes]; // temp copy of nodes
+  let blocks = [];
+
+  // Extract blocks at the same level
+  while (shallowCopyOfNodes.length) {
+    let currentBlock = getBlock(shallowCopyOfNodes);
+    if (!currentBlock) break;
+    blocks.push(currentBlock);
+  }
+
+  // Process extracted blocks
+  blocks &&
+    blocks.forEach(
+      ({
+        ifBlock: ifNodes,
+        elseBlock: elseNodes,
+        condition: expression,
+        blockStart,
+      }) => {
+        const parentNode = node;
+
+        // console.log(ifNodes, elseNodes, expression);
+
         // their initial node parsing to save reactive bits for update
-        ifBlockNodes.forEach((node) => {
+        ifNodes.forEach((node) => {
+          parseEachBlocks(node, variables, stateManager);
+          parseIfStatements(node, variables, stateManager); // handles nested if statements
           parseNode(node, variables, stateManager);
         });
-        elseBlockNodes.length &&
-          elseBlockNodes.forEach((node) => {
+        elseNodes.length &&
+          elseNodes.forEach((node) => {
+            parseEachBlocks(node, variables, stateManager);
+            parseIfStatements(node, variables, stateManager);
             parseNode(node, variables, stateManager);
           });
-        // updater function
+
         let lastEval = undefined;
+        let tempFragment = document.createDocumentFragment(); // temporarily holds the nodes
+
+        // Initial rendering
         const update = () => {
           let evaluation = evaluateExpression(expression, variables);
-
-          // guards against unnecessary rerenders if condition hasn't changed
           if (lastEval === evaluation) return;
 
           if (evaluation) {
-            ifBlockNodes.forEach((node) => {
-              parentNode.insertBefore(node, end);
-            });
-            elseBlockNodes.forEach((node) => {
-              parentNode.removeChild(node);
-            });
+            ifNodes.forEach((n) => tempFragment.appendChild(n));
+            elseNodes.length && elseNodes.forEach((n) => n.remove());
           } else {
-            elseBlockNodes.forEach((node) => {
-              parentNode.insertBefore(node, end);
-            });
-            ifBlockNodes.forEach((node) => {
-              parentNode.removeChild(node);
-            });
+            elseNodes.length &&
+              elseNodes.forEach((n) => tempFragment.appendChild(n));
+            ifNodes.forEach((n) => n.remove());
           }
-
+          parentNode.insertBefore(tempFragment, blockStart.nextSibling);
           lastEval = evaluation;
         };
-        update(); // initial render
+
+        update();
         registerDependencies(
           `{${expression}}`,
           variables,
           update,
           stateManager
-        ); // register for rerender
+        );
       }
+    );
+
+  // Cleanup syntax markers
+  nodes.forEach((n) => {
+    if (n.nodeType === Node.TEXT_NODE) {
+      n.nodeValue = n.nodeValue
+        .replace(start_if, "")
+        .replace(elseRegx, "")
+        .replace(endIfRegx, "");
     }
   });
 
-  nodes.forEach((child) => {
-    parseIfStatements(child, variables, stateManager);
-  });
+  // Continue parsing the remaining nodes (non-if blocks)
+  nodes.forEach((child) => parseIfStatements(child, variables, stateManager));
 }
 
+// parses each blocks
 function parseEachBlocks(element, variables, stateManager) {
   const nodes = Array.from(element.childNodes);
+  if (!nodes.length) return;
 
-  nodes.forEach((node, index) => {
-    const expressionRegex = new RegExp(
-      /\{for:each (.*?)(?:, (.*))? of (.*?)\}/
-    );
+  nodes.forEach((node) => {
+    if (node.nodeType === Node.TEXT_NODE && start_each.test(node.nodeValue)) {
+      const match = node.nodeValue.match(start_each);
 
-    if (
-      node.nodeType === Node.TEXT_NODE &&
-      expressionRegex.test(node.nodeValue)
-    ) {
-      const match = node.nodeValue.match(expressionRegex);
-
-      if (!match) return;
-
-      const itemName = match[1].trim();
+      let itemName = match[1].trim();
       const indexName = match[2]?.trim() || "index";
       const arrayName = match[3].trim();
 
-      const nodeChildren = nodes.slice(index);
+      // allows object destrucutring in for each for itemName
+      const isDistructuredItem = braceRegex.test(itemName);
+      const keys =
+        isDistructuredItem && itemName.split(/[^a-zA-Z_$\.]+/).filter(Boolean);
+      isDistructuredItem && (itemName = "__domMasterObject__"); // won't be used when updating dynamicly created elements. need key values paird will be spread in the localProxy created.
+
       const eachContent = node.nextElementSibling;
-      const parentNode = node.parentNode;
 
-      const arrayOfItems = variables[arrayName];
+      const expression = node.nodeValue.trim();
 
-      // gotta handle each expression for nested for each
-      if (!Array.isArray(arrayOfItems)) {
-        return console.error(
-          `${arrayName}: is not an array at ${node.nodeValue.trim()}`
+      if (!endEach.test(eachContent.nextSibling.nodeValue)) {
+        console.error(
+          `Error: Expected closing state for each block: ${expression}`
         );
       }
 
+      const parentNode = node.parentNode;
+      let blockStart = node;
+
       // Create a tracking state for the block
       const state = {
-        items: arrayOfItems,
         domNodes: [], // Tracks rendered DOM nodes
       };
 
-      // Register reactive updates
       const update = () => {
         // Handle additions, removals, or reordering
-        const newItems = variables[arrayName];
+        // const newItems = variables[arrayName];
+        let value = getValueFromExpression(variables, arrayName).value || [];
+        const newItems = value ? value : null;
+
+        // gotta handle each expression for nested for each
+        if (!newItems || !Array.isArray(newItems)) {
+          // throw new Error(`${arrayName}: is not an array at ${expression}`);
+          console.error(
+            `${arrayName}: is not an array at ${expression}`,
+            variables
+          );
+        }
+
+        // will use an object to
+        newItems.forEach((item) => {
+          if (typeof item === "object" && !item._dom_master_key) {
+            Object.defineProperty(item, "_dom_master_key", {
+              value: uniid(),
+              enumerable: false,
+              writable: false,
+            });
+          }
+        });
 
         // set oldNodes
         const oldNodeMap = new Map(
-          state.domNodes.map(
-            ({ node, data, stateProxy, localManager }, index) => {
-              return [data.item, { node, data, stateProxy, localManager }];
-            }
-          )
+          state.domNodes.map(({ node, data, stateProxy, localManager }) => {
+            return [
+              data._dom_master_key,
+              { node, data, stateProxy, localManager },
+            ];
+          })
         );
 
         const newDomNodes = [];
 
         newItems.forEach((item, index) => {
-          const localContext = {
-            [itemName]: item,
-            [indexName]: index,
-          };
+          const _dom_master_key =
+            typeof item === "object" ? item._dom_master_key : item;
 
-          const localManager = new ReactiveState(localContext);
-          const localProxy = localManager.proxy;
-
-          const stateProxy = createLocalProxy(
-            localProxy,
-            variables,
-            stateManager
-          );
-
-          if (oldNodeMap.has(item)) {
+          if (oldNodeMap.size && oldNodeMap.has(_dom_master_key)) {
             const { node, data, stateProxy, localManager } =
-              oldNodeMap.get(item);
+              oldNodeMap.get(_dom_master_key);
 
             if (data.index != index) {
               // update index binding for node(via proxy)
@@ -472,26 +528,87 @@ function parseEachBlocks(element, variables, stateManager) {
             let newData =
               typeof data.item == "object" ? structuredClone(item) : item;
 
-            localManager[itemName] = newData;
+            // FIXME: here accessing the proxy (when updating existing nodes) is neccessary for subscrition to trigger(need investigating)
+            if (keys) {
+              keys.forEach((key) => {
+                stateProxy[key] = newData[key];
+                localManager.proxy[key] = newData[key];
+              });
+            } else {
+              stateProxy[itemName] = newData;
+              localManager.proxy[itemName] = newData;
+            }
 
             // save new data
             newDomNodes.push({
               node,
-              data: { item, index },
+              data: {
+                item,
+                index: index,
+                _dom_master_key,
+              },
               stateProxy,
               localManager,
             });
-            oldNodeMap.delete(item);
-          } else {
-            if (newItems.length === state.domNodes.length) return; // doesn't add or remove if array is the same length
+
+            oldNodeMap.delete(_dom_master_key);
+          } else if (newItems.length !== state.domNodes.length) {
+            let localContext = {};
+            if (isDistructuredItem) {
+              const newObj = Object.fromEntries(
+                keys.map((key) => {
+                  if (!(key in item))
+                    console.error(
+                      `Error: undefined reading ${key} at: ${expression}`
+                    );
+                  return [key, item[key]];
+                })
+              );
+
+              localContext = {
+                ...newObj,
+                [indexName]: index,
+              };
+            } else {
+              localContext = {
+                [itemName]: item,
+                [indexName]: index,
+              };
+            }
+
+            const localManager = new ReactiveState(
+              localContext,
+              // persist store down to dynamicly created elements
+              stateManager?.globalState
+            );
+            const localProxy = localManager.proxy;
+
+            const stateProxy = createLocalProxy(
+              localProxy,
+              variables,
+              stateManager
+            );
 
             const node = eachContent.cloneNode(true); // cloned node
 
+            // handles nested blocks
+            // parseEachBlocks(node, stateProxy, localManager);
+            if (
+              Array.from(node.childNodes).some((n) =>
+                start_each.test(n.nodeValue)
+              )
+            ) {
+              console.warn(
+                "for:each -> does not work well with nested statements for too much change might cause interfaces to behave in unexpected ways. use for simpler tasks!"
+              );
+            }
+            parseEachBlocks(node, stateProxy, localManager);
+            parseIfStatements(node, stateProxy, localManager); // allow dynamic nested if blocks
             parseNode(node, stateProxy, localManager);
 
             newDomNodes.push({
               node,
-              data: { item, index },
+              data: { item, index, _dom_master_key }, // initializes the key when creating a nodes. and persist it.
               stateProxy,
               localManager,
             });
@@ -508,29 +625,33 @@ function parseEachBlocks(element, variables, stateManager) {
         newDomNodes.forEach(({ node }) => {
           node_placeholder.appendChild(node);
         });
+
         if (node_placeholder.childNodes.length) {
-          parentNode.appendChild(node_placeholder);
+          parentNode.insertBefore(node_placeholder, blockStart.nextSibling); // makes sure that it doesn't brake the normal flow of the ui.
         }
 
         // update state
         state.domNodes = newDomNodes;
-        state.items = newItems;
       };
 
       if (eachContent) {
         // intial render
         update();
         // Register for reactive updates
-        const { unsubscribe } = registerDependencies(
-          `{${arrayName}}`,
-          variables,
-          update,
-          stateManager
-        );
+        registerDependencies(`{${arrayName}}`, variables, update, stateManager);
+        eachContent.remove();
+      } else {
+        console.error(`Error: empty for:each block. at ${expression}`);
       }
+    }
+  });
 
-      // cleanup synthax
-      nodeChildren.forEach((node) => node.remove());
+  // cleanup synthax
+  nodes.forEach((node) => {
+    if (node.nodeType == Node.TEXT_NODE) {
+      node.nodeValue = node.textContent
+        .replace(start_each, "")
+        .replace(endEach, "");
     }
   });
 
@@ -539,74 +660,99 @@ function parseEachBlocks(element, variables, stateManager) {
   });
 }
 
-// utils
-function getNodeRange(nodes, condition) {
-  return nodes.reduce(
-    (newArray, element) => {
-      if (newArray.stopped) return newArray;
-      if (condition(element)) {
-        newArray.stopped = true;
-      } else {
-        newArray.result.push(element);
-      }
-      return newArray;
-    },
-    { result: [], stopped: false }
-  ).result;
+function uniid() {
+  let random = parseFloat(Math.random() * 0.999999);
+  return random.toString(36).substring(2, 12);
 }
 
+function getValueFromExpression(variables, target) {
+  const parts = target.split(/[.\[\]]/).filter(Boolean);
+  let current = variables;
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    const key = parts[i];
+    if (current == null || !(key in current)) {
+      return { has: false, value: undefined };
+    }
+    current = current[key];
+  }
+  const laskey = parts[parts.length - 1];
+  return { has: true, value: current[laskey] };
+}
 function registerDependencies(template, variables, callback, stateManager) {
   const expressions = template.match(braceRegex);
 
-  let unsub;
   expressions.forEach((expression) => {
-    const tokens = expression
-      .trim()
-      .split(/[^a-zA-Z_$\.]+/)
-      .filter(Boolean);
-
-    // filter tokens(props in state)
-    const filteredTokens = [...new Set(tokens)]
-      .map((token) => {
-        if (token.includes(".")) {
-          return token.split(".")[0];
-        }
-        if (token.includes("[")) {
-          return token.split("[")[0];
-        }
-        return token;
-      })
-      .filter((token) => {
-        let check =
-          variables.hasOwnProperty(token) ||
-          variables?.__globalState?.hasOwnProperty(token);
-
-        return check || false;
-      });
+    const filteredTokens = getTokensFromExpression(
+      expression,
+      variables,
+      stateManager
+    );
 
     if (filteredTokens.length == 1) {
       filteredTokens.forEach((token) => {
-        if (variables?.__globalState?.hasOwnProperty(token)) {
-          unsub = variables.__globalManager.subscribe(token, callback);
-        } else unsub = stateManager.subscribe(token, callback);
+        if (variables?.__globalState && token in variables.__globalState) {
+          // takes care of dynamiclly created nodes
+          variables.__globalManager.subscribe(token, callback);
+        } else {
+          stateManager.subscribe(token, callback);
+        }
       });
     }
     // saves update for an expression that depends on multiple state properties(if at least one changes update is triggered)
     else {
       if (
-        filteredTokens.some((token) =>
-          variables?.__globalState?.hasOwnProperty(token)
+        filteredTokens.some(
+          (token) =>
+            variables?.__globalState && token in variables.__globalState
         )
       ) {
         unsub = variables.__globalManager.addExpression(
           filteredTokens,
           callback
         );
-      } else unsub = stateManager.addExpression(filteredTokens, callback);
+      } else {
+        stateManager.addExpression(filteredTokens, callback);
+      }
     }
   });
+}
 
-  return unsub;
+function getTokensFromExpression(expression, variables, stateManager) {
+  const tokens = expression
+    .replace(/(['"])(?:(?!\1|\\).|\\.)*\1/g, "") // Remove quoted substrings
+    .trim()
+    .split(/[^a-zA-Z_$\.]+/)
+    .filter(Boolean);
+
+  function isInTarget(key, target) {
+    return key in target;
+  }
+
+  // filter tokens(props in state)
+  const filteredTokens = [...new Set(tokens)]
+    .map((token) => {
+      if (token.includes(".")) {
+        return token.split(".")[0];
+      }
+      if (token.includes("[")) {
+        return token.split("[")[0];
+      }
+      return token;
+    })
+    .filter((token) => {
+      let isInVars = isInTarget(token, variables);
+      let isIn_globalState =
+        variables?.__globalState && isInTarget(token, variables?.__globalState);
+      let isInGlobalStore =
+        stateManager?.globalState &&
+        isInTarget(token, stateManager.globalState.state);
+
+      let check = isInVars || isIn_globalState || isInGlobalStore;
+      return check || false;
+    });
+
+  return filteredTokens || [];
 }
 
 // Main render function
